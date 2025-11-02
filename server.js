@@ -3,83 +3,97 @@ const QRCode = require('qrcode');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
+app.get('/api/v1/generate-qr', async (req, res) => {
+    try {
+        const { 
+            text, 
+            size = 300, 
+            margin = 4, 
+            dark = '000000', 
+            light = 'FFFFFF',
+            format = 'png' 
+        } = req.query;
 
-const validateInput = (text) => {
-  if (!text || text.trim().length === 0) {
-    return { isValid: false, message: 'Text or URL content is required' };
-  }
-  if (text.length > 4096) {
-    return { isValid: false, message: 'Content too long (max 4096 characters)' };
-  }
-  return { isValid: true };
-};
+        if (!text) {
+            return res.status(400).json({
+                success: false,
+                error: "Missing required parameter 'text'",
+                message: "Please provide text parameter in URL",
+                example: "/api/v1/generate-qr?text=HelloWorld"
+            });
+        }
 
-app.post('/api/v1/generate-qr', async (req, res) => {
-  try {
-    const { text, url, config = {} } = req.body;
-    
-    const content = text || url;
-    const validation = validateInput(content);
-    if (!validation.isValid) {
-      return res.status(400).json({ 
-        error: 'Validation failed',
-        message: validation.message 
-      });
+        if (text.length > 4096) {
+            return res.status(400).json({
+                success: false,
+                error: "Text too long",
+                message: "Maximum text length is 4096 characters"
+            });
+        }
+
+        const qrOptions = {
+            width: parseInt(size),
+            margin: parseInt(margin),
+            color: {
+                dark: `#${dark}`,
+                light: `#${light}`
+            },
+            errorCorrectionLevel: 'H'
+        };
+
+        if (format === 'svg') {
+            const svgString = await QRCode.toString(text, { ...qrOptions, type: 'svg' });
+            res.setHeader('Content-Type', 'image/svg+xml');
+            res.send(svgString);
+        } else if (format === 'png') {
+            const pngBuffer = await QRCode.toBuffer(text, qrOptions);
+            res.setHeader('Content-Type', 'image/png');
+            res.send(pngBuffer);
+        } else if (format === 'base64') {
+            const base64String = await QRCode.toDataURL(text, qrOptions);
+            res.json({
+                success: true,
+                data: {
+                    text: text,
+                    format: 'base64',
+                    qrCode: base64String,
+                    timestamp: new Date().toISOString()
+                }
+            });
+        } else {
+            return res.status(400).json({
+                success: false,
+                error: "Invalid format",
+                message: "Format must be: png, svg, or base64"
+            });
+        }
+
+    } catch (error) {
+        console.error('QR generation error:', error);
+        res.status(500).json({
+            success: false,
+            error: "QR generation failed",
+            message: error.message
+        });
     }
-
-    const qrOptions = {
-      margin: config.margin || 4,
-      width: config.width || 300,
-      color: {
-        dark: config.darkColor || '#000000',
-        light: config.lightColor || '#FFFFFF'
-      },
-      errorCorrectionLevel: config.errorCorrectionLevel || 'M',
-      type: config.type || 'png'
-    };
-
-    let qrResult;
-    if (config.format === 'base64') {
-      qrResult = await QRCode.toDataURL(content, qrOptions);
-    } else {
-      qrResult = await QRCode.toString(content, { ...qrOptions, type: 'terminal' });
-    }
-
-    res.json({
-      success: true,
-      data: {
-        content: content,
-        format: config.format || 'svg',
-        timestamp: new Date().toISOString(),
-        qrCode: qrResult
-      }
-    });
-
-  } catch (error) {
-    console.error('QR generation error:', error);
-    res.status(500).json({ 
-      error: 'Internal server error',
-      message: 'Failed to generate QR code' 
-    });
-  }
 });
 
 app.get('/api/v1/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    service: 'QR Code API' 
-  });
+    res.json({
+        status: 'OK',
+        service: 'QR Code API',
+        timestamp: new Date().toISOString()
+    });
 });
 
 app.use('*', (req, res) => {
-  res.status(404).json({ 
-    error: 'Endpoint not found',
-    message: 'Check API documentation for available endpoints' 
-  });
+    res.status(404).json({
+        success: false,
+        error: "Endpoint not found",
+        message: "Available endpoint: /api/v1/generate-qr"
+    });
 });
 
 app.listen(PORT, () => {
-  console.log(`QR Code API running on port ${PORT}`);
+    console.log(`QR Code API running on port ${PORT}`);
 });
