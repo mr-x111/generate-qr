@@ -10,24 +10,14 @@ app.get('/api/v1/generate-qr', async (req, res) => {
             size = 300, 
             margin = 4, 
             dark = '000000', 
-            light = 'FFFFFF',
-            format = 'png' 
+            light = 'FFFFFF'
         } = req.query;
 
         if (!text) {
             return res.status(400).json({
                 success: false,
                 error: "Missing required parameter 'text'",
-                message: "Please provide text parameter in URL",
-                example: "/api/v1/generate-qr?text=HelloWorld"
-            });
-        }
-
-        if (text.length > 4096) {
-            return res.status(400).json({
-                success: false,
-                error: "Text too long",
-                message: "Maximum text length is 4096 characters"
+                message: "Please provide text parameter in URL"
             });
         }
 
@@ -41,32 +31,20 @@ app.get('/api/v1/generate-qr', async (req, res) => {
             errorCorrectionLevel: 'H'
         };
 
-        if (format === 'svg') {
-            const svgString = await QRCode.toString(text, { ...qrOptions, type: 'svg' });
-            res.setHeader('Content-Type', 'image/svg+xml');
-            res.send(svgString);
-        } else if (format === 'png') {
-            const pngBuffer = await QRCode.toBuffer(text, qrOptions);
-            res.setHeader('Content-Type', 'image/png');
-            res.send(pngBuffer);
-        } else if (format === 'base64') {
-            const base64String = await QRCode.toDataURL(text, qrOptions);
-            res.json({
-                success: true,
-                data: {
-                    text: text,
-                    format: 'base64',
-                    qrCode: base64String,
-                    timestamp: new Date().toISOString()
-                }
-            });
-        } else {
-            return res.status(400).json({
-                success: false,
-                error: "Invalid format",
-                message: "Format must be: png, svg, or base64"
-            });
-        }
+        const qrBuffer = await QRCode.toBuffer(text, qrOptions);
+        const base64Image = qrBuffer.toString('base64');
+        
+        const downloadUrl = `${req.protocol}://${req.get('host')}/api/v1/download-qr/${Buffer.from(text).toString('base64')}?size=${size}&margin=${margin}&dark=${dark}&light=${light}`;
+
+        res.json({
+            success: true,
+            data: {
+                text: text,
+                downloadUrl: downloadUrl,
+                directDownload: `${downloadUrl}&download=true`,
+                timestamp: new Date().toISOString()
+            }
+        });
 
     } catch (error) {
         console.error('QR generation error:', error);
@@ -78,22 +56,53 @@ app.get('/api/v1/generate-qr', async (req, res) => {
     }
 });
 
+app.get('/api/v1/download-qr/:textBase64', async (req, res) => {
+    try {
+        const text = Buffer.from(req.params.textBase64, 'base64').toString();
+        const { 
+            size = 300, 
+            margin = 4, 
+            dark = '000000', 
+            light = 'FFFFFF',
+            download = false
+        } = req.query;
+
+        const qrOptions = {
+            width: parseInt(size),
+            margin: parseInt(margin),
+            color: {
+                dark: `#${dark}`,
+                light: `#${light}`
+            },
+            errorCorrectionLevel: 'H'
+        };
+
+        const qrBuffer = await QRCode.toBuffer(text, qrOptions);
+
+        if (download === 'true') {
+            res.setHeader('Content-Disposition', `attachment; filename="qrcode-${Date.now()}.png"`);
+        }
+        
+        res.setHeader('Content-Type', 'image/png');
+        res.send(qrBuffer);
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: "Download failed",
+            message: error.message
+        });
+    }
+});
+
 app.get('/api/v1/health', (req, res) => {
     res.json({
         status: 'OK',
-        service: 'QR Code API',
+        service: 'QR Code Download API',
         timestamp: new Date().toISOString()
     });
 });
 
-app.use('*', (req, res) => {
-    res.status(404).json({
-        success: false,
-        error: "Endpoint not found",
-        message: "Available endpoint: /api/v1/generate-qr"
-    });
-});
-
 app.listen(PORT, () => {
-    console.log(`QR Code API running on port ${PORT}`);
+    console.log(`QR Download API running on port ${PORT}`);
 });
